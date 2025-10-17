@@ -1,4 +1,4 @@
-// scripts/check-hre.js (CommonJS)
+
 require("@nomicfoundation/hardhat-ethers"); // טוען את ה-plugin
 const hre = require("hardhat");
 

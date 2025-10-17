@@ -56,6 +56,23 @@
       <div class="small">Tip: Use MetaMask on <b>localhost:8545</b> (Hardhat).</div>
     </div>
   </div>
+<div class="card">
+  <h2>Set Election Window (Admin)</h2>
+  <div class="row">
+    <div class="col">
+      <label>Start (local)</label>
+      <input id="startLocal" type="datetime-local" />
+    </div>
+    <div class="col">
+      <label>End (local)</label>
+      <input id="endLocal" type="datetime-local" />
+    </div>
+    <div class="col" style="align-self:flex-end;">
+      <button id="btnSetWindow">Set Window</button>
+    </div>
+  </div>
+  <div class="small mono" id="windowInfo" style="margin-top:8px;">windowSet=— | start=— | end=— | status=—</div>
+</div>
 
 
   <div class="card">
@@ -104,11 +121,15 @@
 <script>
 (() => {
   const { ethers } = window;
+
+  // ABI 
   const VOTING_ABI = [
     "function owner() view returns (address)",
     "function votersMerkleRoot() view returns (bytes32)",
     "function startTime() view returns (uint64)",
     "function endTime() view returns (uint64)",
+    "function setElectionWindow(uint64,uint64)",
+    "function windowSet() view returns (bool)",
     "function candidatesCount() view returns (uint256)",
     "function getCandidate(uint256) view returns (string name, uint256 votes)",
     "function getCandidateWithQuiz(uint256) view returns (string name, uint256 votes, uint8[3] quiz)",
@@ -122,11 +143,17 @@
     "function balanceOf(address) view returns (uint256)",
     "function symbol() view returns (string)"
   ];
+
+  // DOM 
   const el = (id) => document.getElementById(id);
   const $acct = el("acct"), $net = el("net"), $owner = el("owner"), $root = el("root");
   const $start = el("start"), $end = el("end"), $status = el("status");
   const $hasVoted = el("hasVoted"), $cands = el("cands");
   const $balInfo = el("balInfo"), $balSymbol = el("balSymbol"), $balBalance = el("balBalance");
+
+  const $startLocal = el("startLocal");
+  const $endLocal   = el("endLocal");
+  const $windowInfo = el("windowInfo");
 
   const $votingAddr = el("votingAddr"), $balAddr = el("balAddr");
   const $candName = el("candName"), $qa = el("qa"), $qb = el("qb"), $qc = el("qc");
@@ -135,6 +162,7 @@
 
   let provider, signer, account, network, voting, bal, poll;
 
+  // Helpers 
   function parseHexArray(s) {
     if (!s) return [];
     return s.split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
@@ -151,6 +179,46 @@
     return "Open";
   }
 
+  // עזר: המרת datetime-local -> Unix seconds (BigInt) 
+  function localToUnixSeconds(inputEl) {
+    const v = inputEl.value; // "2025-10-17T14:30"
+    if (!v) return 0n;
+    const ms = Date.parse(v); // ממיר לאוניקס לפי לוקאל
+    return BigInt(Math.floor(ms / 1000));
+  }
+
+  // עזר: ריענון מידע חלון הבחירות בכרטיס הייעודי 
+  async function refreshWindowInfo() {
+    if (!voting) { $windowInfo.textContent = "Not attached"; return; }
+    try {
+      const [set, st, en] = await Promise.all([
+        voting.windowSet(),
+        voting.startTime(),
+        voting.endTime()
+      ]);
+
+      const now = Math.floor(Date.now()/1000);
+      const status =
+        !set ? "NOT SET" :
+        (now < Number(st) ? "Not started" :
+         now > Number(en) ? "Ended" : "Active");
+
+      const toLocal = (sec) => {
+        const n = Number(sec);
+        if (!n) return "—";
+        const d = new Date(n * 1000);
+        return isNaN(d.getTime()) ? "—" : d.toLocaleString();
+      };
+
+      $windowInfo.textContent =
+        `windowSet=${set} | start=${st} (${toLocal(st)}) | end=${en} (${toLocal(en)}) | status=${status}`;
+    } catch (e) {
+      console.error(e);
+      $windowInfo.textContent = "Cannot read window (check ABI/contract).";
+    }
+  }
+
+  // Wallet / Attach 
   async function connect() {
     if (!window.ethereum) { alert("MetaMask not found"); return; }
     provider = new ethers.BrowserProvider(window.ethereum);
@@ -173,9 +241,27 @@
       bal = null;
     }
     await loadBasics();
-    clearInterval(poll); poll = setInterval(loadCandidates, 5000);
+    await refreshWindowInfo(); //  מציג מיד את סטטוס החלון בכרטיס הייעודי
+    clearInterval(poll);
+   poll = setInterval(async () => {
+    if (!voting) return;
+     // מרענן סטטוס החלון למטה
+       await refreshWindowInfo();
+    // מרענן הסטטוס גם בכרטיס העליון (Start/End/Status)
+     const [st, en] = await Promise.all([voting.startTime(), voting.endTime()]);
+     $start.textContent = secToLocal(st);
+     $end.textContent = secToLocal(en);
+     $status.textContent = statusFromTimes(Number(st), Number(en));
+     $status.style.background =
+     ($status.textContent === "Open") ? "#dcfce7" :
+     ($status.textContent === "Closed" ? "#fee2e2" : "#f1f5f9");
+     // רשימת המועמדים
+     await loadCandidates();
+    }, 2000);
+
   }
 
+  // Loaders 
   async function loadBasics() {
     if (!voting) return;
     const [o, r, st, en] = await Promise.all([
@@ -189,10 +275,13 @@
     $start.textContent = secToLocal(st);
     $end.textContent = secToLocal(en);
     $status.textContent = statusFromTimes(Number(st), Number(en));
-    $status.style.background = ($status.textContent === "Open") ? "#dcfce7" : ($status.textContent === "Closed" ? "#fee2e2" : "#f1f5f9");
+    $status.style.background =
+      ($status.textContent === "Open") ? "#dcfce7" :
+      ($status.textContent === "Closed" ? "#fee2e2" : "#f1f5f9");
     const hv = await voting.hasVoted(account);
     $hasVoted.textContent = hv ? "Yes" : "No";
     await loadCandidates();
+    await refreshWindowInfo(); // שמירה על סנכרון בין הכרטיסים
   }
 
   async function loadCandidates() {
@@ -218,6 +307,7 @@
     $cands.innerHTML = rows.join("");
   }
 
+  // Admin Actions 
   async function addCandidate() {
     if (!voting) return;
     const name = $candName.value.trim();
@@ -239,6 +329,7 @@
     await loadBasics();
   }
 
+  // Voting 
   async function voteById() {
     if (!voting) return;
     const id = Number($voteId.value||"0")|0;
@@ -257,13 +348,41 @@
     await loadBasics();
   }
 
+  //  Set Window via GUI 
+  async function setWindow() {
+    if (!voting) return alert("Attach contract first.");
+    const start = localToUnixSeconds($startLocal);
+    const end   = localToUnixSeconds($endLocal);
+    if (!start || !end) return alert("Please fill both start and end.");
+    if (end <= start)   return alert("End must be after start.");
+    try {
+      const tx = await voting.setElectionWindow(start, end);
+      await tx.wait();
+      alert("Election window updated.");
+      await refreshWindowInfo();
+      await loadBasics();
+    } catch (err) {
+      console.error(err);
+      alert(err?.reason || err?.message || "Failed to set window");
+    }
+  }
+
+  // Wireup 
   el("btnConnect").onclick = connect;
   el("btnAttach").onclick  = attach;
   el("btnAdd").onclick     = addCandidate;
   el("btnAddQuiz").onclick = addCandidateWithQuiz;
   el("btnVoteId").onclick  = voteById;
   el("btnVoteQuiz").onclick= voteByQuiz;
+  el("btnSetWindow").onclick = setWindow; 
 })();
+if (window.ethereum) {
+  window.ethereum.on("accountsChanged", function (accounts) {
+    console.log("Account changed to:", accounts[0]);
+    window.location.reload(); // רענון אוטומטי כשהחשבון ב-MetaMask משתנה
+  });
+}
+
 </script>
 </body>
 </html>
