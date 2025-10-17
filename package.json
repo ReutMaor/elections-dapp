@@ -1,0 +1,26 @@
+{
+  "name": "elections-dapp",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "clean": "hardhat clean",
+    "check": "hardhat run scripts/check-hre.js",
+    "deploy": "hardhat run scripts/deploy.js",
+    "vote": "hardhat run scripts/vote-and-results.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "ethers": "^6.15.0",
+    "hardhat": "^2.22.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0",
+    "keccak256": "^1.0.6",
+    "merkletreejs": "^0.6.0"
+  },
+  "description": ""
+}

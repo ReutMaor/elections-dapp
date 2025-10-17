@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Elections Admin (Hardhat Localhost)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.12.1/dist/ethers.umd.min.js"></script>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 24px; background:#f8fafc; color:#0f172a; }
+    h1 { font-size: 24px; margin-bottom: 16px; }
+    h2 { font-size: 18px; margin: 16px 0 8px; }
+    .card { background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.04);}
+    .row { display:flex; gap:12px; flex-wrap: wrap; align-items: center; }
+    .col { flex:1 1 260px; }
+    input, textarea, button { font:inherit; }
+    input, textarea { width:100%; padding:10px; border-radius:10px; border:1px solid #cbd5e1; background:#fff; }
+    button { padding:10px 14px; border-radius:10px; border:1px solid #94a3b8; background:#e2e8f0; cursor:pointer; }
+    button:hover { background:#cbd5e1; }
+    .small { font-size: 12px; opacity:.75; }
+    .grid { display:grid; gap:8px; }
+    .candidates { display:grid; gap:8px; }
+    .pill { display:inline-block; background:#f1f5f9; border:1px solid #e2e8f0; padding:2px 8px; border-radius:999px; font-size:12px; margin-left:6px;}
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  </style>
+</head>
+<body>
+  <h1>Elections Admin (Localhost)</h1>
+
+  <div class="card">
+    <div class="row">
+      <button id="btnConnect">Connect MetaMask</button>
+      <div>Account: <b id="acct">—</b></div>
+      <div>Network: <b id="net">—</b></div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div class="col">
+        <label>Voting Address</label>
+    
+        <input id="votingAddr" placeholder="0x..." value="0xa513E6E4b8f2a923D98304ec87F64353C4D5C853" />
+      </div>
+      <div class="col">
+        <label>BAL Address (optional)</label>
+        <input id="balAddr" placeholder="0x..." />
+      </div>
+      <div class="col" style="align-self:flex-end;">
+        <button id="btnAttach">Attach</button>
+      </div>
+    </div>
+    <div class="grid" style="margin-top:8px">
+      <div class="small mono">Owner: <span id="owner">—</span></div>
+      <div class="small mono">Root: <span id="root">—</span></div>
+      <div class="small">Start: <b id="start">—</b> <span class="pill" id="status">—</span></div>
+      <div class="small">End: <b id="end">—</b></div>
+      <div class="small">Has Voted? <b id="hasVoted">—</b></div>
+      <div class="small" id="balInfo" style="display:none;">My <span id="balSymbol">BAL</span> balance: <b id="balBalance">0</b></div>
+      <div class="small">Tip: Use MetaMask on <b>localhost:8545</b> (Hardhat).</div>
+    </div>
+  </div>
+
+
+  <div class="card">
+    <h2>Admin: Add Candidates</h2>
+    <div class="row">
+      <div class="col"><input id="candName" placeholder="Candidate name" /></div>
+      <div><button id="btnAdd">Add (no quiz)</button></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div class="col"><input id="qa" placeholder="Quiz A (0/1/2)" /></div>
+      <div class="col"><input id="qb" placeholder="Quiz B (0/1/2)" /></div>
+      <div class="col"><input id="qc" placeholder="Quiz C (0/1/2)" /></div>
+      <div><button id="btnAddQuiz">Add with Quiz</button></div>
+    </div>
+    <div class="small">* Adding candidates is allowed <b>before</b> the voting window starts.</div>
+  </div>
+
+  <div class="card">
+    <h2>Vote</h2>
+    <div class="row">
+      <div class="col">
+        <h3>By Candidate ID</h3>
+        <input id="voteId" placeholder="candidateId (e.g. 0)" />
+        <textarea id="proofById" rows="3" placeholder="Proof hex array: 0xabc..., 0xdef..."></textarea>
+        <button id="btnVoteId">Vote</button>
+      </div>
+      <div class="col">
+        <h3>By Questionnaire</h3>
+        <div class="row">
+          <div class="col"><input id="va" placeholder="A (0/1/2)" /></div>
+          <div class="col"><input id="vb" placeholder="B (0/1/2)" /></div>
+          <div class="col"><input id="vc" placeholder="C (0/1/2)" /></div>
+        </div>
+        <textarea id="proofQuiz" rows="3" placeholder="Proof hex array: 0xabc..., 0xdef..."></textarea>
+        <button id="btnVoteQuiz">Vote by Questionnaire</button>
+      </div>
+    </div>
+    <div class="small">* The proof must match the connected wallet address (leaf = keccak256(abi.encodePacked(msg.sender))).</div>
+  </div>
+
+  <div class="card">
+    <h2>Live Results</h2>
+    <div id="cands" class="candidates small">No candidates yet.</div>
+  </div>
+
+<script>
+(() => {
+  const { ethers } = window;
+  const VOTING_ABI = [
+    "function owner() view returns (address)",
+    "function votersMerkleRoot() view returns (bytes32)",
+    "function startTime() view returns (uint64)",
+    "function endTime() view returns (uint64)",
+    "function candidatesCount() view returns (uint256)",
+    "function getCandidate(uint256) view returns (string name, uint256 votes)",
+    "function getCandidateWithQuiz(uint256) view returns (string name, uint256 votes, uint8[3] quiz)",
+    "function hasVoted(address) view returns (bool)",
+    "function addCandidate(string name)",
+    "function addCandidateWithQuiz(string name, uint8[3] quiz)",
+    "function vote(uint256 candidateId, bytes32[] proof)",
+    "function voteByQuestionnaire(uint8[3] answers, bytes32[] proof)"
+  ];
+  const BAL_ABI = [
+    "function balanceOf(address) view returns (uint256)",
+    "function symbol() view returns (string)"
+  ];
+  const el = (id) => document.getElementById(id);
+  const $acct = el("acct"), $net = el("net"), $owner = el("owner"), $root = el("root");
+  const $start = el("start"), $end = el("end"), $status = el("status");
+  const $hasVoted = el("hasVoted"), $cands = el("cands");
+  const $balInfo = el("balInfo"), $balSymbol = el("balSymbol"), $balBalance = el("balBalance");
+
+  const $votingAddr = el("votingAddr"), $balAddr = el("balAddr");
+  const $candName = el("candName"), $qa = el("qa"), $qb = el("qb"), $qc = el("qc");
+  const $voteId = el("voteId"), $proofById = el("proofById");
+  const $va = el("va"), $vb = el("vb"), $vc = el("vc"), $proofQuiz = el("proofQuiz");
+
+  let provider, signer, account, network, voting, bal, poll;
+
+  function parseHexArray(s) {
+    if (!s) return [];
+    return s.split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
+  }
+  function secToLocal(sec) {
+    const d = new Date(Number(sec) * 1000);
+    return isNaN(d) ? "—" : d.toLocaleString();
+  }
+  function statusFromTimes(st, en) {
+    const now = Math.floor(Date.now()/1000);
+    if (!st || !en) return "—";
+    if (now < st) return "Not started";
+    if (now > en) return "Closed";
+    return "Open";
+  }
+
+  async function connect() {
+    if (!window.ethereum) { alert("MetaMask not found"); return; }
+    provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    signer = await provider.getSigner();
+    account = await signer.getAddress();
+    network = await provider.getNetwork();
+    $acct.textContent = account;
+    $net.textContent = `${network.name} (${network.chainId})`;
+  }
+
+  async function attach() {
+    if (!signer) return alert("Connect first.");
+    if (!$votingAddr.value) return alert("Enter Voting address.");
+    voting = new ethers.Contract($votingAddr.value, VOTING_ABI, signer);
+    $balInfo.style.display = "none";
+    if ($balAddr.value) {
+      bal = new ethers.Contract($balAddr.value, BAL_ABI, signer);
+    } else {
+      bal = null;
+    }
+    await loadBasics();
+    clearInterval(poll); poll = setInterval(loadCandidates, 5000);
+  }
+
+  async function loadBasics() {
+    if (!voting) return;
+    const [o, r, st, en] = await Promise.all([
+      voting.owner(),
+      voting.votersMerkleRoot(),
+      voting.startTime(),
+      voting.endTime()
+    ]);
+    $owner.textContent = o;
+    $root.textContent = r;
+    $start.textContent = secToLocal(st);
+    $end.textContent = secToLocal(en);
+    $status.textContent = statusFromTimes(Number(st), Number(en));
+    $status.style.background = ($status.textContent === "Open") ? "#dcfce7" : ($status.textContent === "Closed" ? "#fee2e2" : "#f1f5f9");
+    const hv = await voting.hasVoted(account);
+    $hasVoted.textContent = hv ? "Yes" : "No";
+    await loadCandidates();
+  }
+
+  async function loadCandidates() {
+    if (!voting) return;
+    const n = Number(await voting.candidatesCount());
+    if (n === 0) { $cands.innerHTML = "No candidates yet."; return; }
+    const rows = [];
+    for (let i = 0; i < n; i++) {
+      try {
+        const [name, votes, quiz] = await voting.getCandidateWithQuiz(i);
+        rows.push(`<div class="row" style="justify-content:space-between;border:1px solid #e2e8f0;border-radius:10px;padding:8px;">
+          <div><b>#${i}</b> — ${name} <span class="small">Quiz [${Array.from(quiz).join(", ")}]</span></div>
+          <div><b>${Number(votes)}</b></div>
+        </div>`);
+      } catch {
+        const [name, votes] = await voting.getCandidate(i);
+        rows.push(`<div class="row" style="justify-content:space-between;border:1px solid #e2e8f0;border-radius:10px;padding:8px;">
+          <div><b>#${i}</b> — ${name}</div>
+          <div><b>${Number(votes)}</b></div>
+        </div>`);
+      }
+    }
+    $cands.innerHTML = rows.join("");
+  }
+
+  async function addCandidate() {
+    if (!voting) return;
+    const name = $candName.value.trim();
+    if (!name) return alert("Enter candidate name");
+    const tx = await voting.addCandidate(name);
+    await tx.wait();
+    $candName.value = "";
+    await loadBasics();
+  }
+
+  async function addCandidateWithQuiz() {
+    if (!voting) return;
+    const name = $candName.value.trim();
+    if (!name) return alert("Enter candidate name");
+    const a = Number($qa.value||"0")|0, b = Number($qb.value||"0")|0, c = Number($qc.value||"0")|0;
+    const tx = await voting.addCandidateWithQuiz(name, [a,b,c]);
+    await tx.wait();
+    $candName.value = ""; $qa.value = $qb.value = $qc.value = "";
+    await loadBasics();
+  }
+
+  async function voteById() {
+    if (!voting) return;
+    const id = Number($voteId.value||"0")|0;
+    const proof = parseHexArray($proofById.value);
+    const tx = await voting.vote(id, proof);
+    await tx.wait();
+    await loadBasics();
+  }
+
+  async function voteByQuiz() {
+    if (!voting) return;
+    const a = Number($va.value||"0")|0, b = Number($vb.value||"0")|0, c = Number($vc.value||"0")|0;
+    const proof = parseHexArray($proofQuiz.value);
+    const tx = await voting.voteByQuestionnaire([a,b,c], proof);
+    await tx.wait();
+    await loadBasics();
+  }
+
+  el("btnConnect").onclick = connect;
+  el("btnAttach").onclick  = attach;
+  el("btnAdd").onclick     = addCandidate;
+  el("btnAddQuiz").onclick = addCandidateWithQuiz;
+  el("btnVoteId").onclick  = voteById;
+  el("btnVoteQuiz").onclick= voteByQuiz;
+})();
+</script>
+</body>
+</html>

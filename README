@@ -1,0 +1,106 @@
+
+#  Elections DApp  
+Decentralized Voting System built with **Solidity**, **Hardhat**, and **Merkle Proofs**.
+
+##  Overview
+This project implements a blockchain-based election system with:
+- **Merkle-based voter verification**  
+- **BAL reward token minting** for each valid vote  
+- **Time-limited voting window (start/end)**  
+- **Questionnaire-based voting** (matching voter answers to candidate profiles)
+- **Admin web interface** (via `admin.html` + MetaMask)
+
+##  Tech Stack
+- **Solidity 0.8.24**
+- **Hardhat v2.22**
+- **Ethers.js v6**
+- **MerkleTree.js**
+- **OpenZeppelin Contracts**
+- **MetaMask / Web3 GUI**
+
+---
+
+## Project Structure
+
+├── contracts/
+│ ├── Voting.sol # Main election contract
+│ ├── BALToken.sol # ERC20 reward token
+├── scripts/
+│ ├── deploy.js # Deploys contracts + generates Merkle root
+│ ├── vote-and-results.js # Simulates voting & shows results
+│ └── merkle.json # Generated voter proof data
+├── admin.html # GUI for admin & voters
+├── hardhat.config.js
+├── package.json
+└── README.md
+ 
+---
+
+## Setup & Installation
+
+### 1️. Install dependencies
+```bash
+npm install
+---
+2️. Start a local Hardhat blockchain
+npx hardhat node
+---
+3️. Deploy contracts (on localhost)
+npx hardhat run --network localhost scripts/deploy.js
+---
+4️. Simulate voting (optional)
+npx hardhat run --network localhost scripts/vote-and-results.js
+---
+MetaMask Connection
+
+1. Open MetaMask -> Settings -> Networks -> Add network manually
+
+2. Fill the fields:
+
+Network Name: Hardhat Localhost
+
+New RPC URL: http://127.0.0.1:8545
+
+Chain ID: 31337
+
+Currency Symbol: ETH
+
+3. Import one of the private keys printed by npx hardhat node.
+---
+Run the Web Interface
+
+To open the admin panel:
+
+1. Run a local static server in your project root:
+
+npx http-server .
+
+
+2. Then open in your browser:
+
+http://127.0.0.1:8080/admin.html
+
+
+3. Connect MetaMask -> Attach the deployed Voting contract
+(default address: 0xa513E6E4b8f2a923D98304ec87F64353C4D5C853)
+---
+Features
+
+Add candidates (with or without questionnaire)
+
+View live results in real-time
+
+Vote by ID or by answering questionnaire
+
+BAL token reward is minted for each valid vote
+---
+ Example Console Output
+Voters: [0x7099..., 0x3C44..., 0x90F7...]
+Merkle Root: 0x299933cac28b9df1...
+BAL deployed to: 0x5FbDB231...
+Voting deployed to: 0xe7f1725E...
+Results: [Alice: 1, Bob: 0]
+---
+Author:
+Reut Maor
+omputer Science Student @ HIT
