@@ -163,10 +163,34 @@
   let provider, signer, account, network, voting, bal, poll;
 
   // Helpers 
-  function parseHexArray(s) {
-    if (!s) return [];
-    return s.split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
+  // Helpers 
+function parseHexArray(s) {
+  if (!s) return [];
+  const t = s.trim();
+
+  // אם זה נראה כמו JSON array (למשל: ["0xabc","0xdef"]) — ננסה לפרסר כ-JSON
+  if (t.startsWith("[")) {
+    try {
+      const arr = JSON.parse(t);
+      return Array.isArray(arr)
+        ? arr.map(x => String(x).trim()).filter(Boolean)
+        : [];
+    } catch {
+      // ניפול לפורמט "פשוט" אם JSON נכשל
+    }
   }
+
+  // פורמט "פשוט": מפרידים בפסיקים/רווחים ומנקים סוגריים ומרכאות
+  return t
+    .replace(/[\[\]"]/g, "")      // מוריד [ ] ו-"
+    .split(/[\s,]+/)              // מפריד לפי רווחים/פסיקים
+    .map(x => x.trim())
+    .filter(Boolean);
+}
+
+// חשוב: נחשוף כגלובלית כדי שהקונסול יכיר אותה
+window.parseHexArray = parseHexArray;
+
   function secToLocal(sec) {
     const d = new Date(Number(sec) * 1000);
     return isNaN(d) ? "—" : d.toLocaleString();
@@ -217,17 +241,65 @@
       $windowInfo.textContent = "Cannot read window (check ABI/contract).";
     }
   }
+  async function ensureHardhat() {
+    if (!window.ethereum) throw new Error("MetaMask not found");
+
+    // נסה/י לעבור לרשת 31337
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x7a69' }], // 31337 ב-hex
+      });
+    } catch (error) {
+      // אם הרשת לא קיימת בארנק – נוסיף אותה ואז נעבור אליה
+      if (error && error.code === 4902) {
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: '0x7a69',
+            chainName: 'Hardhat Localhost',
+            rpcUrls: ['http://127.0.0.1:8545'],
+            nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+          }],
+        });
+        // אחרי הוספה, נבצע שוב מעבר ליתר ביטחון
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x7a69' }],
+        });
+      } else {
+        console.error("Failed to switch chain:", error);
+        throw error;
+      }
+    }
+  }
+
 
   // Wallet / Attach 
-  async function connect() {
+   async function connect() {
     if (!window.ethereum) { alert("MetaMask not found"); return; }
+
+    // NEW: ודא/י שהארנק על Hardhat 31337
+    try {
+      await ensureHardhat();
+    } catch (e) {
+      alert("Could not switch to Hardhat (31337). Check that Hardhat node is running at http://127.0.0.1:8545");
+      return;
+    }
+
     provider = new ethers.BrowserProvider(window.ethereum);
     await provider.send("eth_requestAccounts", []);
     signer = await provider.getSigner();
     account = await signer.getAddress();
     network = await provider.getNetwork();
+
     $acct.textContent = account;
     $net.textContent = `${network.name} (${network.chainId})`;
+
+    // אופציונלי: בדיקת שרשור – אם זה עדיין לא 31337, נתריע
+    if (Number(network.chainId) !== 31337) {
+      alert(`You're connected to chain ${network.chainId}. Please switch to Hardhat (31337).`);
+    }
   }
 
   async function attach() {
