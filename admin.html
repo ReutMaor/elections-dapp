@@ -6,46 +6,157 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.12.1/dist/ethers.umd.min.js"></script>
   <style>
-    body { font-family: system-ui, Arial, sans-serif; margin: 24px; background:#f8fafc; color:#0f172a; }
-    h1 { font-size: 24px; margin-bottom: 16px; }
-    h2 { font-size: 18px; margin: 16px 0 8px; }
-    .card { background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.04);}
-    .row { display:flex; gap:12px; flex-wrap: wrap; align-items: center; }
-    .col { flex:1 1 260px; }
-    input, textarea, button { font:inherit; }
-    input, textarea { width:100%; padding:10px; border-radius:10px; border:1px solid #cbd5e1; background:#fff; }
-    button { padding:10px 14px; border-radius:10px; border:1px solid #94a3b8; background:#e2e8f0; cursor:pointer; }
-    button:hover { background:#cbd5e1; }
-    .small { font-size: 12px; opacity:.75; }
-    .grid { display:grid; gap:8px; }
-    .candidates { display:grid; gap:8px; }
-    .pill { display:inline-block; background:#f1f5f9; border:1px solid #e2e8f0; padding:2px 8px; border-radius:999px; font-size:12px; margin-left:6px;}
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-  </style>
+  :root{
+    /* פלטת צבעים */
+    --bg: #f6f7fb;
+    --card-bg:#ffffff;
+    --card-br:#e6e9f0;
+    --ink:#0f172a;
+    --muted:#64748b;
+
+    --accent:#4f46e5;      /* אינדיגו */
+    --accent-2:#22c55e;    /* ירוק לאישורים */
+    --accent-3:#06b6d4;    /* ציאן קליל */
+    --btn-grad-1:#6366f1;  /* אינדיגו בהיר */
+    --btn-grad-2:#22d3ee;  /* ציאן בהיר */
+    --ring: rgba(79,70,229,.35);
+    --gap:16px;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    font-family:system-ui, Arial, sans-serif;
+    margin:24px;
+    background:
+      radial-gradient(1200px 600px at 10% -10%, #eef2ff 0, transparent 60%),
+      radial-gradient(1200px 600px at 110% 10%, #ecfeff 0, transparent 60%),
+      var(--bg);
+    color:var(--ink);
+    line-height:1.35;
+  }
+
+  h1{
+    font-size:28px; margin:0 0 18px;
+    letter-spacing:.2px;
+    background:linear-gradient(90deg, var(--accent), var(--accent-3));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  h2{
+    font-size:18px; margin:16px 0 12px; color:#111827;
+  }
+
+  .card{
+    background:var(--card-bg);
+    border:1px solid var(--card-br);
+    border-radius:16px;
+    padding:18px;
+    margin-bottom:18px;
+    box-shadow:
+      0 10px 20px rgba(2,6,23,.04),
+      0 2px 8px rgba(2,6,23,.04);
+  }
+
+  /* ---------- Controls ---------- */
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px}
+  input, textarea, button{font:inherit; transition:.2s ease}
+  input, textarea{
+    width:100%; padding:12px 12px;
+    border-radius:12px; border:1px solid #cdd5e0; background:#fff;
+    outline:0;
+  }
+  input:focus, textarea:focus{
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--ring);
+  }
+  textarea{min-height:96px; resize:vertical}
+
+  button{
+    padding:10px 14px; border-radius:12px;
+    border:0; color:#0b1220; background:#eef2ff; cursor:pointer; font-weight:600;
+  }
+  button:hover{filter:brightness(.98)}
+  /* כפתור “ראשי” – כל הכפתורים אצלך יקבלו את זה אוטומטית */
+  button{
+    color:white;
+    background:linear-gradient(90deg, var(--btn-grad-1), var(--btn-grad-2));
+    box-shadow: 0 6px 14px rgba(79,70,229,.25);
+  }
+  button:hover{transform:translateY(-1px)}
+  button:active{transform:translateY(0)}
+
+  .small{font-size:12px;opacity:.8}
+  .grid{display:grid; gap:8px}
+  .candidates{display:grid; gap:8px}
+  .pill{
+    display:inline-block;background:#f1f5f9;border:1px solid #e2e8f0;
+    padding:2px 8px;border-radius:999px;font-size:12px;margin-left:6px
+  }
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+
+  /* ---------- Layout helpers (כמו קודם, רק גאפים נעימים) ---------- */
+  .toolbar{display:flex;align-items:center;gap:var(--gap);flex-wrap:wrap}
+  .form-3{display:grid;grid-template-columns:1fr 1fr auto;gap:var(--gap)}
+  .form-2{display:grid;grid-template-columns:1fr 1fr auto;gap:var(--gap)}
+  .quiz-4{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:var(--gap)}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap)}
+  .stack{display:grid;gap:var(--gap)}
+  .end-self{justify-self:start;align-self:end}
+  .full{grid-column:1 / -1}
+
+  /* שורת מידע קטנה עם פס דק */
+  .info-line{
+    padding-top:10px; margin-top:10px; border-top:1px dashed #e5e7eb; color:#334155;
+  }
+
+  /* ---------- Status צבעוני (ה-JS שלך כבר מחליף רקע; נוסיף טקסט) ---------- */
+  #status{
+    color:#052e16;
+    font-weight:600;
+  }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 1024px){
+    .form-3{grid-template-columns:1fr 1fr}
+    .form-3 > .end-self{grid-column:1 / -1; justify-self:start}
+    .form-2{grid-template-columns:1fr 1fr}
+    .form-2 > .end-self{grid-column:1 / -1; justify-self:start}
+    .quiz-4{grid-template-columns:1fr 1fr}
+    .quiz-4 > .end-self{grid-column:1 / -1; justify-self:start}
+    .two-col{grid-template-columns:1fr}
+  }
+  @media (max-width: 640px){
+    .form-3, .form-2{grid-template-columns:1fr}
+    .quiz-4{grid-template-columns:1fr}
+  }
+</style>
+
 </head>
 <body>
   <h1>Elections Admin (Localhost)</h1>
 
   <div class="card">
-    <div class="row">
+    <div class="toolbar">
       <button id="btnConnect">Connect MetaMask</button>
       <div>Account: <b id="acct">—</b></div>
       <div>Network: <b id="net">—</b></div>
     </div>
-    <div class="row" style="margin-top:12px">
-      <div class="col">
+
+    <!-- Voting + BAL + Attach in clean grid -->
+    <div class="form-3" style="margin-top:12px">
+      <div>
         <label>Voting Address</label>
-    
         <input id="votingAddr" placeholder="0x..." value="0xa513E6E4b8f2a923D98304ec87F64353C4D5C853" />
       </div>
-      <div class="col">
+      <div>
         <label>BAL Address (optional)</label>
         <input id="balAddr" placeholder="0x..." />
       </div>
-      <div class="col" style="align-self:flex-end;">
+      <div class="end-self">
+        <label>&nbsp;</label>
         <button id="btnAttach">Attach</button>
       </div>
     </div>
+
     <div class="grid" style="margin-top:8px">
       <div class="small mono">Owner: <span id="owner">—</span></div>
       <div class="small mono">Root: <span id="root">—</span></div>
@@ -56,63 +167,118 @@
       <div class="small">Tip: Use MetaMask on <b>localhost:8545</b> (Hardhat).</div>
     </div>
   </div>
-<div class="card">
-  <h2>Set Election Window (Admin)</h2>
-  <div class="row">
-    <div class="col">
-      <label>Start (local)</label>
-      <input id="startLocal" type="datetime-local" />
-    </div>
-    <div class="col">
-      <label>End (local)</label>
-      <input id="endLocal" type="datetime-local" />
-    </div>
-    <div class="col" style="align-self:flex-end;">
-      <button id="btnSetWindow">Set Window</button>
-    </div>
 
+  <div class="card">
+    <h2>Set Election Window (Admin)</h2>
+    <!-- Start + End + Set Window -->
+    <div class="form-2">
+      <div>
+        <label>Start (local)</label>
+        <input id="startLocal" type="datetime-local" />
+      </div>
+      <div>
+        <label>End (local)</label>
+        <input id="endLocal" type="datetime-local" />
+      </div>
+      <div class="end-self">
+        <label>&nbsp;</label>
+        <button id="btnSetWindow">Set Window</button>
+      </div>
+    </div>
+    <div class="small mono" id="windowInfo" style="margin-top:8px;">
+      windowSet=— | start=— | end=— | status=—
+    </div>
   </div>
-  <div class="small mono" id="windowInfo" style="margin-top:8px;">windowSet=— | start=— | end=— | status=—</div>
-</div>
-
-
 
   <div class="card">
     <h2>Admin: Add Candidates</h2>
-    <div class="row">
-      <div class="col"><input id="candName" placeholder="Candidate name" /></div>
-      <div><button id="btnAdd">Add (no quiz)</button></div>
+
+    <!-- Candidate name + Add -->
+    <div class="form-3">
+      <div class="full" style="grid-column:1 / 3;">
+        <label>Candidate name</label>
+        <input id="candName" placeholder="Candidate name" />
+      </div>
+      <div class="end-self">
+        <label>&nbsp;</label>
+        <button id="btnAdd">Add (no quiz)</button>
+      </div>
     </div>
-    <div class="row" style="margin-top:8px">
-      <div class="col"><input id="qa" placeholder="Quiz A (0/1/2)" /></div>
-      <div class="col"><input id="qb" placeholder="Quiz B (0/1/2)" /></div>
-      <div class="col"><input id="qc" placeholder="Quiz C (0/1/2)" /></div>
-      <div><button id="btnAddQuiz">Add with Quiz</button></div>
+
+    <!-- Quiz A/B/C + Add with Quiz -->
+    <div class="quiz-4" style="margin-top:12px">
+      <div>
+        <label>Quiz A (0/1/2)</label>
+        <input id="qa" placeholder="Quiz A (0/1/2)" />
+      </div>
+      <div>
+        <label>Quiz B (0/1/2)</label>
+        <input id="qb" placeholder="Quiz B (0/1/2)" />
+      </div>
+      <div>
+        <label>Quiz C (0/1/2)</label>
+        <input id="qc" placeholder="Quiz C (0/1/2)" />
+      </div>
+      <div class="end-self">
+        <label>&nbsp;</label>
+        <button id="btnAddQuiz">Add with Quiz</button>
+      </div>
     </div>
-    <div class="small">* Adding candidates is allowed <b>before</b> the voting window starts.</div>
+
+    <div class="small" style="margin-top:8px">
+      * Adding candidates is allowed <b>before</b> the voting window starts.
+    </div>
   </div>
 
   <div class="card">
     <h2>Vote</h2>
-    <div class="row">
-      <div class="col">
+
+    <!-- Two clean columns; stack on small screens -->
+    <div class="two-col">
+      <div class="stack">
         <h3>By Candidate ID</h3>
-        <input id="voteId" placeholder="candidateId (e.g. 0)" />
-        <textarea id="proofById" rows="3" placeholder="Proof hex array: 0xabc..., 0xdef..."></textarea>
-        <button id="btnVoteId">Vote</button>
-      </div>
-      <div class="col">
-        <h3>By Questionnaire</h3>
-        <div class="row">
-          <div class="col"><input id="va" placeholder="A (0/1/2)" /></div>
-          <div class="col"><input id="vb" placeholder="B (0/1/2)" /></div>
-          <div class="col"><input id="vc" placeholder="C (0/1/2)" /></div>
+        <div>
+          <label>Candidate ID</label>
+          <input id="voteId" placeholder="candidateId (e.g. 0)" />
         </div>
-        <textarea id="proofQuiz" rows="3" placeholder="Proof hex array: 0xabc..., 0xdef..."></textarea>
-        <button id="btnVoteQuiz">Vote by Questionnaire</button>
+        <div>
+          <label>Proof hex array</label>
+          <textarea id="proofById" placeholder="Proof hex array: 0xabc..., 0xdef..."></textarea>
+        </div>
+        <div>
+          <button id="btnVoteId">Vote</button>
+        </div>
+      </div>
+
+      <div class="stack">
+        <h3>By Questionnaire</h3>
+        <div class="form-3">
+          <div>
+            <label>A (0/1/2)</label>
+            <input id="va" placeholder="A (0/1/2)" />
+          </div>
+          <div>
+            <label>B (0/1/2)</label>
+            <input id="vb" placeholder="B (0/1/2)" />
+          </div>
+          <div>
+            <label>C (0/1/2)</label>
+            <input id="vc" placeholder="C (0/1/2)" />
+          </div>
+        </div>
+        <div>
+          <label>Proof hex array</label>
+          <textarea id="proofQuiz" placeholder="Proof hex array: 0xabc..., 0xdef..."></textarea>
+        </div>
+        <div>
+          <button id="btnVoteQuiz">Vote by Questionnaire</button>
+        </div>
       </div>
     </div>
-    <div class="small">* The proof must match the connected wallet address (leaf = keccak256(abi.encodePacked(msg.sender))).</div>
+
+    <div class="small" style="margin-top:8px">
+      * The proof must match the connected wallet address (leaf = keccak256(abi.encodePacked(msg.sender))).
+    </div>
   </div>
 
   <div class="card">
