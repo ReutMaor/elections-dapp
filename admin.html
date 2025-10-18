@@ -70,9 +70,11 @@
     <div class="col" style="align-self:flex-end;">
       <button id="btnSetWindow">Set Window</button>
     </div>
+
   </div>
   <div class="small mono" id="windowInfo" style="margin-top:8px;">windowSet=— | start=— | end=— | status=—</div>
 </div>
+
 
 
   <div class="card">
@@ -143,6 +145,9 @@
     "function balanceOf(address) view returns (uint256)",
     "function symbol() view returns (string)"
   ];
+  
+  window.VOTING_ABI = VOTING_ABI;
+  window.BAL_ABI    = BAL_ABI;
 
   // DOM 
   const el = (id) => document.getElementById(id);
@@ -277,61 +282,94 @@ window.parseHexArray = parseHexArray;
 
   // Wallet / Attach 
    async function connect() {
-    if (!window.ethereum) { alert("MetaMask not found"); return; }
+  if (!window.ethereum) { alert("MetaMask not found"); return; }
 
-    // NEW: ודא/י שהארנק על Hardhat 31337
-    try {
-      await ensureHardhat();
-    } catch (e) {
-      alert("Could not switch to Hardhat (31337). Check that Hardhat node is running at http://127.0.0.1:8545");
-      return;
-    }
+  // ודאי שהארנק על Hardhat 31337
+  try {
+    await ensureHardhat();
+  } catch (e) {
+    alert("Could not switch to Hardhat (31337). Check that Hardhat node is running at http://127.0.0.1:8545");
+    console.error(e);
+    return;
+  }
 
+  try {
     provider = new ethers.BrowserProvider(window.ethereum);
     await provider.send("eth_requestAccounts", []);
-    signer = await provider.getSigner();
+    signer  = await provider.getSigner();
     account = await signer.getAddress();
     network = await provider.getNetwork();
 
-    $acct.textContent = account;
-    $net.textContent = `${network.name} (${network.chainId})`;
+    // עדכון UI
+    document.getElementById("acct").textContent = account;
+    document.getElementById("net").textContent  = `${network.name} (${network.chainId})`;
 
-    // אופציונלי: בדיקת שרשור – אם זה עדיין לא 31337, נתריע
+    // חשיפה ל-console
+    window.provider = provider;
+    window.signer   = signer;
+    window.account  = account;
+
+    // בדיקת רשת
     if (Number(network.chainId) !== 31337) {
       alert(`You're connected to chain ${network.chainId}. Please switch to Hardhat (31337).`);
     }
+  } catch (err) {
+    console.error("connect() failed:", err);
+    alert(err?.message || "Failed to connect wallet.");
   }
+}
 
-  async function attach() {
-    if (!signer) return alert("Connect first.");
-    if (!$votingAddr.value) return alert("Enter Voting address.");
-    voting = new ethers.Contract($votingAddr.value, VOTING_ABI, signer);
-    $balInfo.style.display = "none";
-    if ($balAddr.value) {
-      bal = new ethers.Contract($balAddr.value, BAL_ABI, signer);
+async function attach() {
+  if (!signer) return alert("Connect first.");
+  if (!document.getElementById("votingAddr").value) return alert("Enter Voting address.");
+
+  try {
+    const votingAddr = document.getElementById("votingAddr").value.trim();
+    const balAddr    = document.getElementById("balAddr").value.trim();
+
+    // יצירת אובייקטים של החוזים
+    voting = new ethers.Contract(votingAddr, VOTING_ABI, signer);
+    window.voting = voting; // חשיפה לקונסול
+
+    // BAL אופציונלי
+    if (balAddr) {
+      bal = new ethers.Contract(balAddr, BAL_ABI, signer);
+      window.bal = bal; // חשיפה לקונסול
+      document.getElementById("balInfo").style.display = "block";
     } else {
       bal = null;
+      document.getElementById("balInfo").style.display = "none";
     }
-    await loadBasics();
-    await refreshWindowInfo(); //  מציג מיד את סטטוס החלון בכרטיס הייעודי
-    clearInterval(poll);
-   poll = setInterval(async () => {
-    if (!voting) return;
-     // מרענן סטטוס החלון למטה
-       await refreshWindowInfo();
-    // מרענן הסטטוס גם בכרטיס העליון (Start/End/Status)
-     const [st, en] = await Promise.all([voting.startTime(), voting.endTime()]);
-     $start.textContent = secToLocal(st);
-     $end.textContent = secToLocal(en);
-     $status.textContent = statusFromTimes(Number(st), Number(en));
-     $status.style.background =
-     ($status.textContent === "Open") ? "#dcfce7" :
-     ($status.textContent === "Closed" ? "#fee2e2" : "#f1f5f9");
-     // רשימת המועמדים
-     await loadCandidates();
-    }, 2000);
 
+    // טעינה ראשונית + תצוגות
+    await loadBasics();
+    await refreshWindowInfo();
+
+    // פולינג כל 2 שניות לעדכון סטטוסים ותוצאות
+    clearInterval(poll);
+    poll = setInterval(async () => {
+      if (!voting) return;
+
+      await refreshWindowInfo();
+
+      const [st, en] = await Promise.all([voting.startTime(), voting.endTime()]);
+      document.getElementById("start").textContent = secToLocal(st);
+      document.getElementById("end").textContent   = secToLocal(en);
+
+      const statusTxt = statusFromTimes(Number(st), Number(en));
+      const $status   = document.getElementById("status");
+      $status.textContent = statusTxt;
+      $status.style.background =
+        (statusTxt === "Open")   ? "#dcfce7" :
+        (statusTxt === "Closed") ? "#fee2e2" : "#f1f5f9";
+
+      await loadCandidates();
+    }, 2000);
+  } catch (err) {
+    console.error("attach() failed:", err);
+    alert(err?.reason || err?.message || "Failed to attach contract.");
   }
+}
 
   // Loaders 
   async function loadBasics() {
@@ -438,6 +476,8 @@ window.parseHexArray = parseHexArray;
       alert(err?.reason || err?.message || "Failed to set window");
     }
   }
+ 
+
 
   // Wireup 
   el("btnConnect").onclick = connect;
@@ -447,6 +487,8 @@ window.parseHexArray = parseHexArray;
   el("btnVoteId").onclick  = voteById;
   el("btnVoteQuiz").onclick= voteByQuiz;
   el("btnSetWindow").onclick = setWindow; 
+ 
+
 })();
 if (window.ethereum) {
   window.ethereum.on("accountsChanged", function (accounts) {

@@ -102,6 +102,8 @@ contract Voting {
         windowSet = true;
         emit ElectionWindowUpdated(_start, _end);
     }
+    
+
 
     ///  הוספת מועמד חדש ללא שאלון (תואם לאחור לסקריפטים קיימים)
     function addCandidate(string calldata name) external {
