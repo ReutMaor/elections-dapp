@@ -1,4 +1,3 @@
-// scripts/deploy.js (CommonJS, Hardhat v2 + ethers v6)
 require("@nomicfoundation/hardhat-ethers");
 const hre = require("hardhat");
 const keccak256 = require("keccak256");
@@ -8,12 +7,9 @@ const fs = require("node:fs");
 function addrToBytes(address) {
   return Buffer.from(hre.ethers.getBytes(address)); // 20-byte address
 }
-
-// leaf = keccak256(abi.encodePacked(address))
 function leafOf(address) {
   return keccak256(addrToBytes(address));
 }
-
 function buildVoterMerkle(addrs) {
   const leaves = addrs.map(leafOf);
   const tree = new MerkleTree(leaves, keccak256, { sortPairs: true });
@@ -22,20 +18,24 @@ function buildVoterMerkle(addrs) {
 }
 
 async function main() {
+  // ניקח 1 admin + שלושה מצביעים
   const [admin, voter1, voter2, voter3] = await hre.ethers.getSigners();
   const voterAddresses = [voter1.address, voter2.address, voter3.address];
 
+  // בונים מרקל ומייצרים proofs לכולם
   const { tree, root } = buildVoterMerkle(voterAddresses);
+  const proofs = {};
+  for (const addr of voterAddresses) {
+    const leaf = leafOf(addr);
+    proofs[addr] = tree.getHexProof(leaf);
+  }
+
   console.log("Voters:", voterAddresses);
   console.log("Merkle Root:", root);
 
-  // ✅ קובע זמן יחסית לבלוק הנוכחי כדי להיות חסין ל-fast-forward קודם
-  const latest = await hre.ethers.provider.getBlock("latest");
-  const startOffset = 5 * 60;           // 5 דקות
-  const windowSecs = 24 * 60 * 60;      // 24 שעות
-  const startTime = latest.timestamp + startOffset;
-  const endTime = startTime + windowSecs;
-  console.log(`Deploying with window: start=${startTime} end=${endTime} (now=${latest.timestamp})`);
+  // חלון זמן יוגדר מה-GUI (0,0 בדיפלוי)
+  const startTime = 0;
+  const endTime = 0;
 
   // 1) BALToken
   const BAL = await hre.ethers.getContractFactory("BALToken");
@@ -49,23 +49,18 @@ async function main() {
   await voting.waitForDeployment();
   console.log("Voting deployed to:", voting.target);
 
-  // קישור הטוקן והעברת בעלות לטובת mint דרך Voting
+  // קישור טוקן BAL והעברת בעלות ל-Voting כדי שיוכל למנט
   await (await voting.setRewardToken(bal.target)).wait();
   console.log("Reward token set on Voting.");
   await (await bal.transferOwnership(voting.target)).wait();
   console.log("Transferred BAL ownership to Voting.");
 
-  // הוספת מועמדים (לפני תחילת ההצבעה)
-await (await voting.addCandidateWithQuiz("Alice", [1, 0, 2])).wait();
-await (await voting.addCandidateWithQuiz("Bob",   [0, 1, 2])).wait();
+  // מועמדים לדוגמה (מותר לפני תחילת ההצבעה)
+  await (await voting.addCandidateWithQuiz("Alice", [1, 0, 2])).wait();
+  await (await voting.addCandidateWithQuiz("Bob",   [0, 1, 2])).wait();
+  console.log("Candidates added: Alice, Bob (with quiz)");
 
-console.log("Candidates added: Alice, Bob (with quiz)");
-
-  // הוכחת מרקל לדוגמה
-  const leaf1 = leafOf(voter1.address);
-  const proof1 = tree.getHexProof(leaf1);
-  console.log("Sample proof for voter1 (len):", proof1.length);
-
+  // כותבים קובץ עזר עם כל הפרטים + proofs ל-3 מצביעים
   fs.writeFileSync(
     "scripts/merkle.json",
     JSON.stringify(
@@ -73,8 +68,8 @@ console.log("Candidates added: Alice, Bob (with quiz)");
         contracts: { voting: voting.target, bal: bal.target },
         voters: voterAddresses,
         root,
-        window: { startTime, endTime },
-        sampleProofs: { [voter1.address]: proof1 }
+        window: { startTime, endTime }, // יישאר 0,0 עד שהאדמין יקבע ב-GUI
+        proofs // { "0x7099...": ["0x..","0x.."], "0x3C44...": [...], "0x90F7...": [...] }
       },
       null,
       2

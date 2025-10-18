@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @dev ממשק מינימלי לטוקן BAL שמאפשר הטבעה (mint)
+///  ממשק מינימלי לטוקן BAL שמאפשר הטבעה (mint)
 interface IBALMint {
     function mint(address to, uint256 amount) external;
 }
 
-/// @title Voting with Merkle-verified voter registry, time window, BAL reward, and questionnaire voting
-/// @notice Elections contract: admin adds candidates (optionally with a 3-answer quiz),
+///  Voting with Merkle-verified voter registry, time window, BAL reward, and questionnaire voting
+///  Elections contract: admin adds candidates (optionally with a 3-answer quiz),
 ///         voters can vote by id or by questionnaire similarity; each valid vote mints BAL.
 contract Voting {
     /*//////////////////////////////////////////////////////////////
@@ -26,8 +26,11 @@ contract Voting {
 
     address public immutable owner;
     bytes32 public immutable votersMerkleRoot;
-    uint64 public immutable startTime;
-    uint64 public immutable endTime;
+
+    // היו immutable; כעת ניתן לקבוע/לעדכן לפני התחלה דרך האדמין
+    uint64 public startTime;
+    uint64 public endTime;
+    bool   public windowSet; // האם הוגדר חלון (true אחרי setElectionWindow או קונסטרקטור עם ערכים >0)
 
     Candidate[] private _candidates;
     mapping(address => bool) public hasVoted;
@@ -44,6 +47,7 @@ contract Voting {
     event Voted(address indexed voter, uint256 indexed candidateId);
     event RewardTokenUpdated(address indexed token);
     event VoteRewardMinted(address indexed voter, uint256 amount);
+    event ElectionWindowUpdated(uint256 start, uint256 end);
 
     /*//////////////////////////////////////////////////////////////
                               ERRORS
@@ -62,35 +66,61 @@ contract Voting {
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
+    // אותו API כמו קודם — רק כעת מותר להעביר 0,0 כדי לקבוע מאוחר יותר דרך GUI
     constructor(bytes32 _votersMerkleRoot, uint64 _startTime, uint64 _endTime) {
-        require(_endTime >= _startTime, "bad window");
         owner = msg.sender;
         votersMerkleRoot = _votersMerkleRoot;
-        startTime = _startTime;
-        endTime = _endTime;
+
+        if (_startTime == 0 && _endTime == 0) {
+            // לא נקבעו זמנים — יוגדרו דרך setElectionWindow
+            startTime = 0;
+            endTime = 0;
+            windowSet = false;
+        } else {
+            require(_endTime > _startTime, "bad window");
+            require(_startTime > block.timestamp, "start must be future");
+            startTime = _startTime;
+            endTime = _endTime;
+            windowSet = true;
+        }
     }
 
     /*//////////////////////////////////////////////////////////////
                            OWNER ACTIONS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice הוספת מועמד חדש ללא שאלון (תואם לאחור לסקריפטים קיימים)
+    ///  קביעת/עדכון חלון בחירות לפני ההתחלה (דרך האדמין/GUI)
+    function setElectionWindow(uint64 _start, uint64 _end) external {
+        if (msg.sender != owner) revert NotOwner();
+        // אם כבר יש חלון והתחיל — אסור לשנות
+        if (windowSet && block.timestamp >= startTime) revert VotingAlreadyStarted();
+        require(_end > _start, "end after start");
+        require(_start > block.timestamp, "start must be future");
+
+        startTime = _start;
+        endTime   = _end;
+        windowSet = true;
+        emit ElectionWindowUpdated(_start, _end);
+    }
+
+    ///  הוספת מועמד חדש ללא שאלון (תואם לאחור לסקריפטים קיימים)
     function addCandidate(string calldata name) external {
         if (msg.sender != owner) revert NotOwner();
-        if (block.timestamp >= startTime) revert VotingAlreadyStarted();
+        // לפני התחלה בלבד; אבל אם החלון עדיין לא נקבע — מותר להוסיף
+        if (windowSet && block.timestamp >= startTime) revert VotingAlreadyStarted();
         _candidates.push(Candidate({name: name, votes: 0, quiz: [uint8(0), uint8(0), uint8(0)]}));
         emit CandidateAdded(_candidates.length - 1, name);
     }
 
-    /// @notice הוספת מועמד עם שלוש תשובות לשאלון
+    ///  הוספת מועמד עם שלוש תשובות לשאלון
     function addCandidateWithQuiz(string calldata name, uint8[3] calldata quiz) external {
         if (msg.sender != owner) revert NotOwner();
-        if (block.timestamp >= startTime) revert VotingAlreadyStarted();
+        if (windowSet && block.timestamp >= startTime) revert VotingAlreadyStarted();
         _candidates.push(Candidate({name: name, votes: 0, quiz: quiz}));
         emit CandidateAdded(_candidates.length - 1, name);
     }
 
-    /// @notice הגדרת חוזה ה-BAL
+    ///  הגדרת חוזה ה-BAL
     function setRewardToken(address token) external {
         if (msg.sender != owner) revert NotOwner();
         require(token != address(0), "zero token");
@@ -98,7 +128,7 @@ contract Voting {
         emit RewardTokenUpdated(token);
     }
 
-    /// @notice עדכון סכום תגמול לכל קול
+    ///  עדכון סכום תגמול לכל קול
     function setRewardPerVote(uint256 amount) external {
         if (msg.sender != owner) revert NotOwner();
         rewardPerVote = amount;
@@ -108,18 +138,20 @@ contract Voting {
                                VOTING
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice הצבעה ישירה לפי מזהה מועמד
+    ///  הצבעה ישירה לפי מזהה מועמד
     function vote(uint256 candidateId, bytes32[] calldata merkleProof) external {
         _performVote(candidateId, merkleProof);
     }
 
-    /// @notice הצבעה לפי שאלון: בוחר את המועמד עם מירב ההתאמות (tie-breaker: מזהה קטן יותר)
+    ///  הצבעה לפי שאלון: בוחר את המועמד עם מירב ההתאמות (tie-breaker: מזהה קטן יותר)
     function voteByQuestionnaire(uint8[3] calldata answers, bytes32[] calldata merkleProof) external {
         uint256 bestId = _bestMatchCandidate(answers);
         _performVote(bestId, merkleProof);
     }
 
     function _performVote(uint256 candidateId, bytes32[] calldata merkleProof) internal {
+        // חדש: ודאי שהוגדר חלון
+        if (!windowSet) revert VotingNotStarted();
         if (block.timestamp < startTime) revert VotingNotStarted();
         if (block.timestamp > endTime) revert VotingClosed();
         if (candidateId >= _candidates.length) revert InvalidCandidate();
@@ -153,7 +185,7 @@ contract Voting {
                 bestScore = score;
                 bestId = i;
             }
-            // אם יש תיקו, נשארים עם ה-id הקטן יותר (הראשון שמצאנו)
+            // תיקו => נשארים עם ה-id הראשון (הקטן יותר)
         }
         return bestId;
     }
@@ -174,14 +206,14 @@ contract Voting {
         return _candidates.length;
     }
 
-    /// @notice שמירת תאימות: החזרה כמו פעם (שם+קולות)
+    ///  שמירת תאימות: החזרה כמו פעם (שם+קולות)
     function getCandidate(uint256 candidateId) external view returns (string memory name, uint256 votes) {
         if (candidateId >= _candidates.length) revert InvalidCandidate();
         Candidate storage c = _candidates[candidateId];
         return (c.name, c.votes);
     }
 
-    /// @notice גטר מורחב: שם+קולות+שאלון
+    ///  גטר מורחב: שם+קולות+שאלון
     function getCandidateWithQuiz(uint256 candidateId) external view returns (string memory name, uint256 votes, uint8[3] memory quiz) {
         if (candidateId >= _candidates.length) revert InvalidCandidate();
         Candidate storage c = _candidates[candidateId];
@@ -205,4 +237,3 @@ contract Voting {
         return computed == root;
     }
 }
-

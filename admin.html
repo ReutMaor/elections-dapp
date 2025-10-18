@@ -56,6 +56,23 @@
       <div class="small">Tip: Use MetaMask on <b>localhost:8545</b> (Hardhat).</div>
     </div>
   </div>
+<div class="card">
+  <h2>Set Election Window (Admin)</h2>
+  <div class="row">
+    <div class="col">
+      <label>Start (local)</label>
+      <input id="startLocal" type="datetime-local" />
+    </div>
+    <div class="col">
+      <label>End (local)</label>
+      <input id="endLocal" type="datetime-local" />
+    </div>
+    <div class="col" style="align-self:flex-end;">
+      <button id="btnSetWindow">Set Window</button>
+    </div>
+  </div>
+  <div class="small mono" id="windowInfo" style="margin-top:8px;">windowSet=— | start=— | end=— | status=—</div>
+</div>
 
 
   <div class="card">
@@ -104,11 +121,15 @@
 <script>
 (() => {
   const { ethers } = window;
+
+  // ABI 
   const VOTING_ABI = [
     "function owner() view returns (address)",
     "function votersMerkleRoot() view returns (bytes32)",
     "function startTime() view returns (uint64)",
     "function endTime() view returns (uint64)",
+    "function setElectionWindow(uint64,uint64)",
+    "function windowSet() view returns (bool)",
     "function candidatesCount() view returns (uint256)",
     "function getCandidate(uint256) view returns (string name, uint256 votes)",
     "function getCandidateWithQuiz(uint256) view returns (string name, uint256 votes, uint8[3] quiz)",
@@ -122,11 +143,17 @@
     "function balanceOf(address) view returns (uint256)",
     "function symbol() view returns (string)"
   ];
+
+  // DOM 
   const el = (id) => document.getElementById(id);
   const $acct = el("acct"), $net = el("net"), $owner = el("owner"), $root = el("root");
   const $start = el("start"), $end = el("end"), $status = el("status");
   const $hasVoted = el("hasVoted"), $cands = el("cands");
   const $balInfo = el("balInfo"), $balSymbol = el("balSymbol"), $balBalance = el("balBalance");
+
+  const $startLocal = el("startLocal");
+  const $endLocal   = el("endLocal");
+  const $windowInfo = el("windowInfo");
 
   const $votingAddr = el("votingAddr"), $balAddr = el("balAddr");
   const $candName = el("candName"), $qa = el("qa"), $qb = el("qb"), $qc = el("qc");
@@ -135,10 +162,35 @@
 
   let provider, signer, account, network, voting, bal, poll;
 
-  function parseHexArray(s) {
-    if (!s) return [];
-    return s.split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
+  // Helpers 
+  // Helpers 
+function parseHexArray(s) {
+  if (!s) return [];
+  const t = s.trim();
+
+  // אם זה נראה כמו JSON array (למשל: ["0xabc","0xdef"]) — ננסה לפרסר כ-JSON
+  if (t.startsWith("[")) {
+    try {
+      const arr = JSON.parse(t);
+      return Array.isArray(arr)
+        ? arr.map(x => String(x).trim()).filter(Boolean)
+        : [];
+    } catch {
+      // ניפול לפורמט "פשוט" אם JSON נכשל
+    }
   }
+
+  // פורמט "פשוט": מפרידים בפסיקים/רווחים ומנקים סוגריים ומרכאות
+  return t
+    .replace(/[\[\]"]/g, "")      // מוריד [ ] ו-"
+    .split(/[\s,]+/)              // מפריד לפי רווחים/פסיקים
+    .map(x => x.trim())
+    .filter(Boolean);
+}
+
+// חשוב: נחשוף כגלובלית כדי שהקונסול יכיר אותה
+window.parseHexArray = parseHexArray;
+
   function secToLocal(sec) {
     const d = new Date(Number(sec) * 1000);
     return isNaN(d) ? "—" : d.toLocaleString();
@@ -151,15 +203,103 @@
     return "Open";
   }
 
-  async function connect() {
+  // עזר: המרת datetime-local -> Unix seconds (BigInt) 
+  function localToUnixSeconds(inputEl) {
+    const v = inputEl.value; // "2025-10-17T14:30"
+    if (!v) return 0n;
+    const ms = Date.parse(v); // ממיר לאוניקס לפי לוקאל
+    return BigInt(Math.floor(ms / 1000));
+  }
+
+  // עזר: ריענון מידע חלון הבחירות בכרטיס הייעודי 
+  async function refreshWindowInfo() {
+    if (!voting) { $windowInfo.textContent = "Not attached"; return; }
+    try {
+      const [set, st, en] = await Promise.all([
+        voting.windowSet(),
+        voting.startTime(),
+        voting.endTime()
+      ]);
+
+      const now = Math.floor(Date.now()/1000);
+      const status =
+        !set ? "NOT SET" :
+        (now < Number(st) ? "Not started" :
+         now > Number(en) ? "Ended" : "Active");
+
+      const toLocal = (sec) => {
+        const n = Number(sec);
+        if (!n) return "—";
+        const d = new Date(n * 1000);
+        return isNaN(d.getTime()) ? "—" : d.toLocaleString();
+      };
+
+      $windowInfo.textContent =
+        `windowSet=${set} | start=${st} (${toLocal(st)}) | end=${en} (${toLocal(en)}) | status=${status}`;
+    } catch (e) {
+      console.error(e);
+      $windowInfo.textContent = "Cannot read window (check ABI/contract).";
+    }
+  }
+  async function ensureHardhat() {
+    if (!window.ethereum) throw new Error("MetaMask not found");
+
+    // נסה/י לעבור לרשת 31337
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x7a69' }], // 31337 ב-hex
+      });
+    } catch (error) {
+      // אם הרשת לא קיימת בארנק – נוסיף אותה ואז נעבור אליה
+      if (error && error.code === 4902) {
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: '0x7a69',
+            chainName: 'Hardhat Localhost',
+            rpcUrls: ['http://127.0.0.1:8545'],
+            nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+          }],
+        });
+        // אחרי הוספה, נבצע שוב מעבר ליתר ביטחון
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x7a69' }],
+        });
+      } else {
+        console.error("Failed to switch chain:", error);
+        throw error;
+      }
+    }
+  }
+
+
+  // Wallet / Attach 
+   async function connect() {
     if (!window.ethereum) { alert("MetaMask not found"); return; }
+
+    // NEW: ודא/י שהארנק על Hardhat 31337
+    try {
+      await ensureHardhat();
+    } catch (e) {
+      alert("Could not switch to Hardhat (31337). Check that Hardhat node is running at http://127.0.0.1:8545");
+      return;
+    }
+
     provider = new ethers.BrowserProvider(window.ethereum);
     await provider.send("eth_requestAccounts", []);
     signer = await provider.getSigner();
     account = await signer.getAddress();
     network = await provider.getNetwork();
+
     $acct.textContent = account;
     $net.textContent = `${network.name} (${network.chainId})`;
+
+    // אופציונלי: בדיקת שרשור – אם זה עדיין לא 31337, נתריע
+    if (Number(network.chainId) !== 31337) {
+      alert(`You're connected to chain ${network.chainId}. Please switch to Hardhat (31337).`);
+    }
   }
 
   async function attach() {
@@ -173,9 +313,27 @@
       bal = null;
     }
     await loadBasics();
-    clearInterval(poll); poll = setInterval(loadCandidates, 5000);
+    await refreshWindowInfo(); //  מציג מיד את סטטוס החלון בכרטיס הייעודי
+    clearInterval(poll);
+   poll = setInterval(async () => {
+    if (!voting) return;
+     // מרענן סטטוס החלון למטה
+       await refreshWindowInfo();
+    // מרענן הסטטוס גם בכרטיס העליון (Start/End/Status)
+     const [st, en] = await Promise.all([voting.startTime(), voting.endTime()]);
+     $start.textContent = secToLocal(st);
+     $end.textContent = secToLocal(en);
+     $status.textContent = statusFromTimes(Number(st), Number(en));
+     $status.style.background =
+     ($status.textContent === "Open") ? "#dcfce7" :
+     ($status.textContent === "Closed" ? "#fee2e2" : "#f1f5f9");
+     // רשימת המועמדים
+     await loadCandidates();
+    }, 2000);
+
   }
 
+  // Loaders 
   async function loadBasics() {
     if (!voting) return;
     const [o, r, st, en] = await Promise.all([
@@ -189,10 +347,13 @@
     $start.textContent = secToLocal(st);
     $end.textContent = secToLocal(en);
     $status.textContent = statusFromTimes(Number(st), Number(en));
-    $status.style.background = ($status.textContent === "Open") ? "#dcfce7" : ($status.textContent === "Closed" ? "#fee2e2" : "#f1f5f9");
+    $status.style.background =
+      ($status.textContent === "Open") ? "#dcfce7" :
+      ($status.textContent === "Closed" ? "#fee2e2" : "#f1f5f9");
     const hv = await voting.hasVoted(account);
     $hasVoted.textContent = hv ? "Yes" : "No";
     await loadCandidates();
+    await refreshWindowInfo(); // שמירה על סנכרון בין הכרטיסים
   }
 
   async function loadCandidates() {
@@ -218,6 +379,7 @@
     $cands.innerHTML = rows.join("");
   }
 
+  // Admin Actions 
   async function addCandidate() {
     if (!voting) return;
     const name = $candName.value.trim();
@@ -239,6 +401,7 @@
     await loadBasics();
   }
 
+  // Voting 
   async function voteById() {
     if (!voting) return;
     const id = Number($voteId.value||"0")|0;
@@ -257,13 +420,41 @@
     await loadBasics();
   }
 
+  //  Set Window via GUI 
+  async function setWindow() {
+    if (!voting) return alert("Attach contract first.");
+    const start = localToUnixSeconds($startLocal);
+    const end   = localToUnixSeconds($endLocal);
+    if (!start || !end) return alert("Please fill both start and end.");
+    if (end <= start)   return alert("End must be after start.");
+    try {
+      const tx = await voting.setElectionWindow(start, end);
+      await tx.wait();
+      alert("Election window updated.");
+      await refreshWindowInfo();
+      await loadBasics();
+    } catch (err) {
+      console.error(err);
+      alert(err?.reason || err?.message || "Failed to set window");
+    }
+  }
+
+  // Wireup 
   el("btnConnect").onclick = connect;
   el("btnAttach").onclick  = attach;
   el("btnAdd").onclick     = addCandidate;
   el("btnAddQuiz").onclick = addCandidateWithQuiz;
   el("btnVoteId").onclick  = voteById;
   el("btnVoteQuiz").onclick= voteByQuiz;
+  el("btnSetWindow").onclick = setWindow; 
 })();
+if (window.ethereum) {
+  window.ethereum.on("accountsChanged", function (accounts) {
+    console.log("Account changed to:", accounts[0]);
+    window.location.reload(); // רענון אוטומטי כשהחשבון ב-MetaMask משתנה
+  });
+}
+
 </script>
 </body>
 </html>
